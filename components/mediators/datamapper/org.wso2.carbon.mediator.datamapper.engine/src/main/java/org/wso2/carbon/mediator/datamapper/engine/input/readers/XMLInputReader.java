@@ -201,9 +201,15 @@ public class XMLInputReader implements InputReader {
             }
         }
         /* If an object/element(String/boolean/integer/number) property contains xis:nil=true
+<<<<<<< HEAD
           need  to avoid writing those fields */
         if (!isXsiNil(omElement)) {
         /* If there is text in the OMElement */
+=======
+           need  to avoid writing those fields */
+        if (!isXsiNil(omElement)) {
+            /* If there is text in the OMElement */
+>>>>>>> wso2/master
             if (DataMapperEngineConstants.STRING_ELEMENT_TYPE.equals(elementType)
                 || DataMapperEngineConstants.BOOLEAN_ELEMENT_TYPE.equals(elementType)
                 || DataMapperEngineConstants.INTEGER_ELEMENT_TYPE.equals(elementType)
@@ -217,7 +223,11 @@ public class XMLInputReader implements InputReader {
                 }
             }
 
+<<<<<<< HEAD
         /* writing attributes to the JSON message */
+=======
+            /* writing attributes to the JSON message */
+>>>>>>> wso2/master
             it_attr = omElement.getAllAttributes();
             if (it_attr.hasNext()) {
                 writeAttributes(nextJSONSchemaMap);
@@ -225,7 +235,11 @@ public class XMLInputReader implements InputReader {
 
             it = omElement.getChildElements();
 
+<<<<<<< HEAD
         /* Recursively call all the children */
+=======
+            /* Recursively call all the children */
+>>>>>>> wso2/master
             while (it.hasNext()) {
                 prevElementNameSpaceLocalName = xmlTraverse(it.next(), prevElementNameSpaceLocalName,
                                                             nextJSONSchemaMap);

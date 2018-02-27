@@ -102,16 +102,28 @@
             form.client_retry_interval.focus();
             return false;
         }
-        
-        if (IsEmpty(form.max_delivery_attempts) && form.max_delivery_drop.value.trim() == "Enabled") {
-            CARBON.showWarningDialog('<fmt:message key="drop.message.Error.empty"/>')
-            form.max_delivery_attempts.focus();
+
+        if (!isNumber(form.store_connection_retry_interval)) {
+            CARBON.showWarningDialog('<fmt:message key="number.field.cannot.be.minus"/>')
+            form.client_retry_interval.focus();
+            return false;
+        }
+
+        if (!isMinusOne(form.store_connection_attempts) && !isNumber(form.store_connection_attempts)) {
+            CARBON.showWarningDialog('<fmt:message key="number.field.cannot.be.minus"/>')
+            form.client_retry_interval.focus();
             return false;
         }
         
-        if (form.max_delivery_attempts.value.trim() < 1 && form.max_delivery_drop.value.trim() == "Enabled") {
+        if (IsEmpty(form.max_redelivery_attempts) && form.max_delivery_drop.value.trim() == "Enabled") {
+            CARBON.showWarningDialog('<fmt:message key="drop.message.Error.empty"/>')
+            form.max_redelivery_attempts.focus();
+            return false;
+        }
+        
+        if (form.max_redelivery_attempts.value.trim() < 1 && form.max_delivery_drop.value.trim() == "Enabled") {
             CARBON.showWarningDialog('<fmt:message key="drop.message.Error.less.than.one"/>')
-            form.max_delivery_attempts.focus();
+            form.max_redelivery_attempts.focus();
             return false;
         }
 
@@ -149,6 +161,14 @@
         }
     }
 
+    function isMinusOne(aTextField) {
+        if (aTextField.value.trim() == -1) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
     function submitTextContent(value) {
         addServiceParams();
         return true;
@@ -161,12 +181,15 @@
     	document.getElementById("tableParams").value = "";
         addServiceParameter("interval", document.getElementById('retry_interval').value);
         addServiceParameter("client.retry.interval", document.getElementById('client_retry_interval').value);
-        addServiceParameter("max.delivery.attempts", document.getElementById('max_delivery_attempts').value);
+        addServiceParameter("max.delivery.attempts", document.getElementById('max_redelivery_attempts').value);
+        addServiceParameter("max.store.connection.attempts", document.getElementById('store_connection_attempts').value);
+        addServiceParameter("store.connection.retry.interval", document.getElementById('store_connection_retry_interval').value);
         addServiceParameter("axis2.repo", document.getElementById('axis2_repo').value);
         addServiceParameter("axis2.config", document.getElementById('axis2_config').value);
         addServiceParameter("message.processor.reply.sequence", document.getElementById('message_processor_reply_sequence').value);
         addServiceParameter("message.processor.fault.sequence", document.getElementById('message_processor_fault_sequence').value);
         addServiceParameter("message.processor.deactivate.sequence", document.getElementById('message_processor_deactivate_sequence').value);
+        addServiceParameter("message.processor.failMessagesStore", document.getElementById('FailMessagesStore').value);
         addServiceParameter("quartz.conf", document.getElementById('quartz_conf').value);
         addServiceParameter("cronExpression", document.getElementById('cron_expression').value);
         addServiceParameter("is.active", document.getElementById('mp_state').value);
@@ -454,9 +477,9 @@
                     </tr>
                     <tr>
                         <td><fmt:message key="max.redelivery.attempts"/></td>
-                        <td><input type="text" id="max_delivery_attempts" name="max_delivery_attempts"
+                        <td><input type="text" id="max_redelivery_attempts" name="max_redelivery_attempts"
                                    value="<%=((null!=processorData)&& processorData.getParams() != null
-                                        && !processorData.getParams().isEmpty()&&(processorData.getParams().get("max.redelivery.attempts")!=null))?processorData.getParams().get("max.redelivery.attempts"):"4"%>"
+                                        && !processorData.getParams().isEmpty()&&(processorData.getParams().get("max.delivery.attempts")!=null))?processorData.getParams().get("max.delivery.attempts"):"4"%>"
                                 />
                         </td>
                     </tr>
@@ -478,6 +501,26 @@
                                         <option value="Enabled">Enabled</option>
                                 <% } %>
                             </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><fmt:message key="store.connection.attempts"/></td>
+                        <td><input type="text" id="store_connection_attempts" name="store_connection_attempts"
+                                   value="<%=((null!=processorData)&& processorData.getParams() != null
+                                        && !processorData.getParams().isEmpty()&&(processorData.getParams()
+                                        .get("max.store.connection.attempts")!=null))?processorData.getParams()
+                                        .get("max.store.connection.attempts"):"-1"%>"
+                                />
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><fmt:message key="store.connection.retry.interval"/></td>
+                        <td><input type="text" id="store_connection_retry_interval"
+                        name="store_connection_retry_interval"
+                                   value="<%=((null!=processorData)&& processorData.getParams() != null
+                                        && !processorData.getParams().isEmpty()&&(processorData.getParams()
+                                        .get("store.connection.retry.interval")!=null))?processorData.getParams()
+                                        .get("store.connection.retry.interval"):"1000"%>"/>
                         </td>
                     </tr>
                     <tr>
@@ -536,6 +579,33 @@
                           </td>
 
                     </tr>
+                    <%if (((null!=processorData)&& processorData.getParams() != null
+                            && !processorData.getParams().isEmpty()
+                            &&(processorData.getParams().get("message.processor.failMessagesStore")!=null))) { %>
+                        <tr>
+                            <td><fmt:message key="message.processor.failMessagesStore"/></td>
+                            <td>
+                                <input name="FailMessagesStore" id="FailMessagesStore" type="hidden"
+                                       value="<%=processorData.getParams().get("message.processor.failMessagesStore")%>"/>
+                                <label id="FailMessagesStore_label" for="FailMessagesStore"><%=processorData.getParams()
+                                       .get("message.processor.failMessagesStore")%>
+                                </label>
+                                <br/>
+                            </td>
+                        </tr>
+                        <%} else {%>
+                        <tr>
+                            <td><fmt:message key="message.processor.failMessagesStore"/></td>
+                            <td>
+                                <select id="FailMessagesStore" name="FailMessagesStore">
+                                    <%for (String msn : messageStores) {%>
+                                    <option selected="true" value="<%=msn%>"><%=msn%>
+                                    </option>
+                                    <%} %>
+                                </select>
+                            </td>
+                        </tr>
+                    <%}%>
                     <tr>
                         <td><fmt:message key="quartz.conf"/></td>
                         <td><input type="text" id="quartz_conf" name="quartz_conf"

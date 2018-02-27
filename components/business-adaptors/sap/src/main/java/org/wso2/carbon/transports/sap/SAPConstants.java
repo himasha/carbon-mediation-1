@@ -40,6 +40,17 @@ public class SAPConstants {
     public static final String CUSTOM_ERROR_LISTENER_PARAM = "transport.sap.customErrorListener";
     public static final String CUSTOM_EXCEPTION_LISTENER_PARAM = "transport.sap.customExceptionListener";
     public static final String CUSTOM_TID_HANDLER_PARAM = "transport.sap.customTIDHandler";
+    public static final String TRANSACTION_COMMIT_PARAM = "transport.sap.transactionCommit";
+    public static final String TRANSACTION_SAP_LOGON = "transport.sap.logon";
+    public static final String TRANSPORT_SAP_EXTCOMPANY = "transport.sap.EXTCOMPANY";
+    public static final String TRANSPORT_SAP_EXTPRODUCT = "transport.sap.EXTPRODUCT";
+    public static final String TRANSPORT_SAP_INTERFACE = "transport.sap.INTERFACE";
+    public static final String TRANSPORT_SAP_VERSION = "transport.sap.VERSION";
+    public static final String EXTCOMPANY = "EXTCOMPANY";
+    public static final String EXTPRODUCT = "EXTPRODUCT";
+    public static final String INTERFACE = "INTERFACE";
+    public static final String VERSION = "VERSION";
+    public static final String BABI_XMI_LOGON = "BAPI_XMI_LOGON";
 
     /* Transport sender parameters */
     public static final String CUSTOM_IDOC_XML_MAPPERS = "transport.sap.customXMLMappers";
@@ -57,4 +68,8 @@ public class SAPConstants {
     /* Client options */
     public static final String CLIENT_XML_MAPPER_KEY = "transport.sap.xmlMapper";
     public static final String CLIENT_XML_PARSER_OPTIONS = "transport.sap.xmlParserOptions";
+
+    /* bapi for transaction */
+    public static final String BAPI_TRANSACTION_COMMIT = "BAPI_TRANSACTION_COMMIT";
+    public static final String BAPI_TRANSACTION_ROLLBACK = "BAPI_TRANSACTION_ROLLBACK";
 }

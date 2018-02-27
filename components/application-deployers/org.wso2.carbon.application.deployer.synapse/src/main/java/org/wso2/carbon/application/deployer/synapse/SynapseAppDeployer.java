@@ -57,8 +57,6 @@ import org.wso2.carbon.mediation.initializer.ServiceBusConstants;
 import org.wso2.carbon.mediation.initializer.ServiceBusUtils;
 import org.wso2.carbon.mediation.initializer.persistence.MediationPersistenceManager;
 import org.wso2.carbon.mediation.initializer.services.SynapseEnvironmentService;
-import org.wso2.carbon.mediation.library.service.LibraryInfo;
-import org.wso2.carbon.mediation.library.service.MediationLibraryAdminService;
 import org.wso2.carbon.mediation.library.util.LocalEntryUtil;
 
 import javax.xml.namespace.QName;
@@ -68,7 +66,10 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -98,50 +99,82 @@ public class SynapseAppDeployer implements AppDeploymentHandler {
 
         deployClassMediators(artifacts, axisConfig);
         deploySynapseLibrary(artifacts, axisConfig);
+        Map<String, List<Artifact.Dependency>> artifactTypeMap = getOrderedArtifactsMap(artifacts);
+
+        //deploy artifacts
+        for (String artifactType : artifactTypeMap.keySet()) {
+            deployArtifactType(artifactTypeMap.get(artifactType), carbonApp, axisConfig);
+        }
+    }
+
+    /**
+     * Add the artifacts in a CAPP to a dependency based orders list
+     */
+    private Map<String, List<Artifact.Dependency>> getOrderedArtifactsMap(List<Artifact.Dependency> artifacts) {
+        //lists to hold different artifact types considering the deployment order
+        Map<String, List<Artifact.Dependency>> artifactTypeMap = new LinkedHashMap<>();
+        artifactTypeMap.put(SynapseAppDeployerConstants.MEDIATOR_TYPE, new ArrayList<Artifact.Dependency>());
+        artifactTypeMap.put(SynapseAppDeployerConstants.SYNAPSE_LIBRARY_TYPE, new ArrayList<Artifact.Dependency>());
+        artifactTypeMap.put(SynapseAppDeployerConstants.LOCAL_ENTRY_TYPE, new ArrayList<Artifact.Dependency>());
+        artifactTypeMap.put(SynapseAppDeployerConstants.ENDPOINT_TYPE, new ArrayList<Artifact.Dependency>());
+        artifactTypeMap.put(SynapseAppDeployerConstants.SEQUENCE_TYPE, new ArrayList<Artifact.Dependency>());
+        artifactTypeMap.put(SynapseAppDeployerConstants.MESSAGE_STORE_TYPE, new ArrayList<Artifact.Dependency>());
+        artifactTypeMap.put(SynapseAppDeployerConstants.TEMPLATE_TYPE, new ArrayList<Artifact.Dependency>());
+        artifactTypeMap.put(SynapseAppDeployerConstants.PROXY_SERVICE_TYPE, new ArrayList<Artifact.Dependency>());
+        artifactTypeMap.put(SynapseAppDeployerConstants.TASK_TYPE, new ArrayList<Artifact.Dependency>());
+        artifactTypeMap.put(SynapseAppDeployerConstants.EVENT_SOURCE_TYPE, new ArrayList<Artifact.Dependency>());
+        artifactTypeMap.put(SynapseAppDeployerConstants.MESSAGE_PROCESSOR_TYPE, new ArrayList<Artifact.Dependency>());
+        artifactTypeMap.put(SynapseAppDeployerConstants.API_TYPE, new ArrayList<Artifact.Dependency>());
+        artifactTypeMap.put(SynapseAppDeployerConstants.INBOUND_ENDPOINT_TYPE, new ArrayList<Artifact.Dependency>());
+        artifactTypeMap.put(SynapseAppDeployerConstants.OTHER_TYPE, new ArrayList<Artifact.Dependency>());
+
+        //Categorize artifacts based on the artifact type
         for (Artifact.Dependency dep : artifacts) {
-            Artifact artifact = dep.getArtifact();
-
-            if (!validateArtifact(artifact)) {
-                continue;
-            }
-
-            String artifactDirName = getArtifactDirName(artifact);
-            if (artifactDirName == null) {
-                continue;
-            }
-            Deployer deployer = getDeployer(axisConfig, artifactDirName);
-            String artifactDir = getArtifactDirPath(axisConfig, artifactDirName);
-
-            artifact.setRuntimeObjectName(artifact.getName());
-
-            if (deployer != null) {
-                String fileName = artifact.getFiles().get(0).getName();
-                String artifactPath = artifact.getExtractedPath() + File.separator + fileName;
-                File artifactInRepo = new File(artifactDir + File.separator + fileName);
-
-                if (SynapseAppDeployerConstants.SEQUENCE_TYPE.equals(artifact.getType()) &&
-                    handleMainFaultSeqDeployment(artifact, axisConfig)) {
-                } else if (artifactInRepo.exists()) {
-                    log.warn("Artifact " + fileName + " already found in " + artifactInRepo.getAbsolutePath() +
-                    ". Ignoring CAPP's artifact");
-                    artifact.setDeploymentStatus(AppDeployerConstants.DEPLOYMENT_STATUS_DEPLOYED);
-                } else {
-                    try {
-                        setCustomLogContent(deployer, carbonApp);
-                        deployer.deploy(new DeploymentFileData(new File(artifactPath), deployer));
-                        artifact.setDeploymentStatus(AppDeployerConstants.DEPLOYMENT_STATUS_DEPLOYED);
-                    } catch (DeploymentException e) {
-                        artifact.setDeploymentStatus(AppDeployerConstants.DEPLOYMENT_STATUS_FAILED);
-                        throw e;
-                    } finally {
-                        //clear the log appender once deployment is finished to avoid appending the
-                        //same log to other classes.
-                        setCustomLogContent(deployer, null);
-                        CustomLogSetter.getInstance().clearThreadLocalContent();
-                    }
-                }
+            switch (dep.getArtifact().getType()) {
+                case SynapseAppDeployerConstants.MEDIATOR_TYPE:
+                    artifactTypeMap.get(SynapseAppDeployerConstants.MEDIATOR_TYPE).add(dep);
+                    break;
+                case SynapseAppDeployerConstants.SYNAPSE_LIBRARY_TYPE:
+                    artifactTypeMap.get(SynapseAppDeployerConstants.SYNAPSE_LIBRARY_TYPE).add(dep);
+                    break;
+                case SynapseAppDeployerConstants.LOCAL_ENTRY_TYPE:
+                    artifactTypeMap.get(SynapseAppDeployerConstants.LOCAL_ENTRY_TYPE).add(dep);
+                    break;
+                case SynapseAppDeployerConstants.ENDPOINT_TYPE:
+                    artifactTypeMap.get(SynapseAppDeployerConstants.ENDPOINT_TYPE).add(dep);
+                    break;
+                case SynapseAppDeployerConstants.SEQUENCE_TYPE:
+                    artifactTypeMap.get(SynapseAppDeployerConstants.SEQUENCE_TYPE).add(dep);
+                    break;
+                case SynapseAppDeployerConstants.MESSAGE_STORE_TYPE:
+                    artifactTypeMap.get(SynapseAppDeployerConstants.MESSAGE_STORE_TYPE).add(dep);
+                    break;
+                case SynapseAppDeployerConstants.TEMPLATE_TYPE:
+                    artifactTypeMap.get(SynapseAppDeployerConstants.TEMPLATE_TYPE).add(dep);
+                    break;
+                case SynapseAppDeployerConstants.PROXY_SERVICE_TYPE:
+                    artifactTypeMap.get(SynapseAppDeployerConstants.PROXY_SERVICE_TYPE).add(dep);
+                    break;
+                case SynapseAppDeployerConstants.TASK_TYPE:
+                    artifactTypeMap.get(SynapseAppDeployerConstants.TASK_TYPE).add(dep);
+                    break;
+                case SynapseAppDeployerConstants.EVENT_SOURCE_TYPE:
+                    artifactTypeMap.get(SynapseAppDeployerConstants.EVENT_SOURCE_TYPE).add(dep);
+                    break;
+                case SynapseAppDeployerConstants.MESSAGE_PROCESSOR_TYPE:
+                    artifactTypeMap.get(SynapseAppDeployerConstants.MESSAGE_PROCESSOR_TYPE).add(dep);
+                    break;
+                case SynapseAppDeployerConstants.API_TYPE:
+                    artifactTypeMap.get(SynapseAppDeployerConstants.API_TYPE).add(dep);
+                    break;
+                case SynapseAppDeployerConstants.INBOUND_ENDPOINT_TYPE:
+                    artifactTypeMap.get(SynapseAppDeployerConstants.INBOUND_ENDPOINT_TYPE).add(dep);
+                    break;
+                default:
+                    artifactTypeMap.get(SynapseAppDeployerConstants.OTHER_TYPE).add(dep);
             }
         }
+        return artifactTypeMap;
     }
 
     /**
@@ -156,6 +189,24 @@ public class SynapseAppDeployer implements AppDeploymentHandler {
 
         List<Artifact.Dependency> artifacts = carbonApplication.getAppConfig()
                 .getApplicationArtifact().getDependencies();
+        // Reverse artifacts dependency order should be used for un deployment, EI-1737
+        Map<String, List<Artifact.Dependency>> artifactTypeMap = getOrderedArtifactsMap(artifacts);
+        List<String> artifactTypesList = new ArrayList<String>(artifactTypeMap.keySet());
+        Collections.reverse(artifactTypesList);
+
+        for (String artifactType : artifactTypesList) {
+            undeployArtifactType(carbonApplication, axisConfig, artifactTypeMap.get(artifactType));
+        }
+    }
+
+    /**
+     * Un deploy a given artifact type
+     * @param carbonApplication
+     * @param axisConfig
+     * @param artifacts
+     */
+    private void undeployArtifactType(CarbonApplication carbonApplication, AxisConfiguration axisConfig,
+            List<Artifact.Dependency> artifacts) {
 
         for (Artifact.Dependency dep : artifacts) {
 
@@ -970,6 +1021,58 @@ public class SynapseAppDeployer implements AppDeploymentHandler {
         }
     }
 
+    /**
+     * This deploys artifacts when a list of artifacts is provided
+     *
+     * @param artifacts - List of artifacts which should be deployed
+     * @param carbonApp  - CarbonApplication instance to check for artifacts
+     * @param axisConfig - AxisConfiguration of the current tenant
+     * @throws DeploymentException if some error occurs while deployment
+     */
+    public void deployArtifactType(List<Artifact.Dependency> artifacts, CarbonApplication carbonApp,
+                                AxisConfiguration axisConfig) throws DeploymentException {
+        for (Artifact.Dependency dep : artifacts) {
+            Artifact artifact = dep.getArtifact();
+            String artifactDirName = getArtifactDirName(artifact);
+
+            if (!validateArtifact(artifact) || artifactDirName == null) {
+                continue;
+            }
+
+            Deployer deployer = getDeployer(axisConfig, artifactDirName);
+            String artifactDir = getArtifactDirPath(axisConfig, artifactDirName);
+
+            artifact.setRuntimeObjectName(artifact.getName());
+
+            if (deployer != null) {
+                String fileName = artifact.getFiles().get(0).getName();
+                String artifactPath = artifact.getExtractedPath() + File.separator + fileName;
+                File artifactInRepo = new File(artifactDir + File.separator + fileName);
+
+                if (SynapseAppDeployerConstants.SEQUENCE_TYPE.equals(artifact.getType()) &&
+                        handleMainFaultSeqDeployment(artifact, axisConfig)) {
+                } else if (artifactInRepo.exists()) {
+                    log.warn("Artifact " + fileName + " already found in " + artifactInRepo.getAbsolutePath() +
+                            ". Ignoring CAPP's artifact");
+                    artifact.setDeploymentStatus(AppDeployerConstants.DEPLOYMENT_STATUS_DEPLOYED);
+                } else {
+                    try {
+                        setCustomLogContent(deployer, carbonApp);
+                        deployer.deploy(new DeploymentFileData(new File(artifactPath), deployer));
+                        artifact.setDeploymentStatus(AppDeployerConstants.DEPLOYMENT_STATUS_DEPLOYED);
+                    } catch (DeploymentException e) {
+                        artifact.setDeploymentStatus(AppDeployerConstants.DEPLOYMENT_STATUS_FAILED);
+                        throw e;
+                    } finally {
+                        //clear the log appender once deployment is finished to avoid appending the
+                        //same log to other classes.
+                        setCustomLogContent(deployer, null);
+                        CustomLogSetter.getInstance().clearThreadLocalContent();
+                    }
+                }
+            }
+        }
+    }
 }
 
 

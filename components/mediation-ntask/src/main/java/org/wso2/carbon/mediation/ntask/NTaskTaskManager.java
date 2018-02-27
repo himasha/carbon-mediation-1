@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.axis2.description.Parameter;
 import org.apache.commons.logging.Log;
@@ -37,6 +38,7 @@ import org.wso2.carbon.core.ServerStartupHandler;
 import org.wso2.carbon.mediation.ntask.internal.NtaskService;
 import org.wso2.carbon.ntask.common.TaskException;
 import org.wso2.carbon.ntask.core.TaskInfo;
+import org.wso2.carbon.ntask.core.impl.LocalTaskActionListener;
 import org.wso2.carbon.ntask.core.impl.clustered.ClusteredTaskManager;
 import org.wso2.carbon.ntask.core.service.TaskService;
 import org.wso2.carbon.utils.CarbonUtils;
@@ -72,8 +74,10 @@ public class NTaskTaskManager implements TaskManager, TaskServiceObserver, Serve
 
     @Override
     public boolean schedule(TaskDescription taskDescription) {
-		logger.debug("#schedule Scheduling task : " + taskId(taskDescription));
-		TaskInfo taskInfo;
+        if (logger.isDebugEnabled()) {
+            logger.debug("#schedule Scheduling task : " + taskId(taskDescription));
+        }
+        TaskInfo taskInfo;
 		try {
 			taskInfo = TaskBuilder.buildTaskInfo(taskDescription, properties);
 		} catch (Exception e) {
@@ -89,7 +93,9 @@ public class NTaskTaskManager implements TaskManager, TaskServiceObserver, Serve
 		if (!isInitialized()) {
 			// if cannot schedule yet, put in the pending tasks list.
 			synchronized (lock) {
-				logger.debug("#schedule Added pending task : " + taskId(taskDescription));
+                if (logger.isDebugEnabled()) {
+                    logger.debug("#schedule Added pending task : " + taskId(taskDescription));
+                }
                 queueTask(taskDescription);
 			}
 			return false;
@@ -97,13 +103,17 @@ public class NTaskTaskManager implements TaskManager, TaskServiceObserver, Serve
 		try {
 			synchronized (lock) {
 				if (taskManager == null) {
-					logger.debug("#schedule Could not schedule task " + taskId(taskDescription) +
-					             ". Task manager is not available.");
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("#schedule Could not schedule task " + taskId(taskDescription) +
+                                ". Task manager is not available.");
+                    }
                     queueTask(taskDescription);
 					return false;
 				}
                 taskManager.registerTask(taskInfo);
-                taskManager.scheduleTask(taskInfo.getName());
+                if (NtaskService.getTaskService().isServerInit()) {
+                    taskManager.scheduleTask(taskInfo.getName());
+                }
                 removeTask(taskDescription);
 			}
 			logger.info("Scheduled task " + taskId(taskDescription));
@@ -132,8 +142,11 @@ public class NTaskTaskManager implements TaskManager, TaskServiceObserver, Serve
 				TaskDescription description = TaskBuilder.buildTaskDescription(taskInfo);
 				taskInfo = TaskBuilder.buildTaskInfo(description, properties);
 				taskManager.registerTask(taskInfo);
-				taskManager.rescheduleTask(taskInfo.getName());
-			}
+                final TaskService taskService = NtaskService.getTaskService();
+                if (taskService != null && taskService.isServerInit()) {
+                    taskManager.rescheduleTask(taskInfo.getName());
+                }
+            }
 		} catch (Exception e) {
 			return false;
 		}
@@ -329,10 +342,14 @@ public class NTaskTaskManager implements TaskManager, TaskServiceObserver, Serve
                     return false;
                 }
                 if ((taskManager = getTaskManager(false)) == null) {
-                    logger.debug("#init Could not initialize task manager. " + managerId());
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("#init Could not initialize task manager. " + managerId());
+                    }
                     return false;
                 } else {
-                    logger.debug("#init Obtained Carbon task manager " + managerId());
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("#init Obtained Carbon task manager " + managerId());
+                    }
                 }
 
                 initialized = true;
@@ -745,6 +762,29 @@ public class NTaskTaskManager implements TaskManager, TaskServiceObserver, Serve
             }
         }
 
+    }
+
+    /**
+     * Registers a listener to the {@link org.wso2.carbon.ntask.core.TaskManager} to be notified when a local task is
+     * deleted.
+     *
+     * @param listener the listener to be notified
+     * @param taskName the task name for which the listener is bound
+     */
+    public void registerListener(final LocalTaskActionListener listener, final String taskName) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                while (taskManager == null) {
+                    try {
+                        TimeUnit.SECONDS.sleep(1);
+                    } catch (InterruptedException e) {
+                        //Continue looping to check if task manager is set.
+                    }
+                }
+                taskManager.registerLocalTaskActionListener(listener, taskName);
+            }
+        }).start();
     }
 
 }

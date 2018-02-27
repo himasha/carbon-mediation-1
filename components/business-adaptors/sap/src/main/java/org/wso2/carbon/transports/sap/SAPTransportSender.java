@@ -72,9 +72,20 @@ public class SAPTransportSender extends AbstractTransportSender {
     public static final int SAP_TRANSPORT_ERROR = 8000;
 
     /**
+     * String constant for the header name of sap transaciton id.
+     */
+    public static final String SAP_TRANSACTION_ID = "SAP-Transaction-Id";
+
+    /**
      * SAP destination error. Possibly something wrong with the remote R/* system
      */
     public static final int SAP_DESTINATION_ERROR = 8001;
+
+    /**
+     * This property allows to sent the original SAP error message without handling at SAP implementation and throwing
+     * as an AxisFault
+     */
+    private static final String SAP_ESCAPE_ERROR_HANDLING = "sap.escape.error.handling";
 
     @Override
     public void init(ConfigurationContext cfgCtx, TransportOutDescription trpOut) throws AxisFault {
@@ -131,24 +142,85 @@ public class SAPTransportSender extends AbstractTransportSender {
                 IDocRepository iDocRepository = JCoIDoc.getIDocRepository(destination);
                 String tid = destination.createTID();
                 IDocDocumentList iDocList = getIDocs(messageContext, iDocRepository);
+
+                //Set the transaction id as a transport header so that it can be used later.
+                Object headers = messageContext.getProperty(org.apache.axis2.context.MessageContext.TRANSPORT_HEADERS);
+                Map headersMap = (Map) headers;
+                headersMap.put(SAP_TRANSACTION_ID, tid);
+
                 JCoIDoc.send(iDocList, getIDocVersion(uri), destination, tid);
                 destination.confirmTID(tid);
+
             } else if (uri.getScheme().equals(SAPConstants.SAP_BAPI_PROTOCOL_NAME)) {
+                String escapeErrorHandling = (String) messageContext.getProperty(SAP_ESCAPE_ERROR_HANDLING);
+                boolean isLogon = isLogon(messageContext);
+                if (log.isDebugEnabled()) {
+                    log.debug("Transaction property :" + messageContext
+                            .getProperty(SAPConstants.TRANSACTION_COMMIT_PARAM));
+                    log.debug("Logon property :" + messageContext.getProperty(SAPConstants.TRANSACTION_SAP_LOGON));
+                }
                 try {
                     OMElement payLoad,body;
                     body = messageContext.getEnvelope().getBody();
                     payLoad = body.getFirstChildWithName(new QName(RFCConstants.BAPIRFC));
-                    log.info("Received RFC/Meta DATA: " + payLoad);
+                    if (log.isDebugEnabled()){
+                        log.debug("Received RFC/Meta DATA: " + payLoad);
+                    }
                     String rfcFunctionName = RFCMetaDataParser.getBAPIRFCFucntionName(payLoad);
-                    log.info("Looking up the BAPI/RFC function: " + rfcFunctionName + ". In the " +
-                             "meta data repository");
-
-                    JCoFunction function = getRFCfunction(destination, rfcFunctionName);
-                    RFCMetaDataParser.processMetaDataDocument(payLoad, function);
-                    String responseXML = evaluateRFCfunction(function, destination);
+                    if (isTransaction(messageContext) || isLogon) {
+                        log.info("Begin Transaction");
+                        JCoContext.begin(destination);
+                    }
+                    if (isLogon) {
+                        logon(messageContext, destination, escapeErrorHandling);
+                    }
+                    if (log.isDebugEnabled()){
+                        log.debug("Looking up the BAPI/RFC function: " + rfcFunctionName + ". In the " +
+                                "meta data repository");
+                    }
+                    String responseXML;
+                    if (isTransaction(messageContext)) {
+                        //start transaction
+                        JCoContext.begin(destination);
+                        if (log.isDebugEnabled()){
+                            log.debug("Begin transaction.");
+                        }
+                        //calling BAPI function
+                        JCoFunction function = getRFCfunction(destination, rfcFunctionName);
+                        RFCMetaDataParser.processMetaDataDocument(payLoad, function);
+                        responseXML = evaluateRFCfunction(function, destination, escapeErrorHandling);
+                        //commit the transaction
+                        JCoFunction commitFunction = getRFCfunction(destination, SAPConstants.BAPI_TRANSACTION_COMMIT);
+                        evaluateRFCfunction(commitFunction, destination, escapeErrorHandling);
+                        if (log.isDebugEnabled()){
+                            log.debug("Commit transaction.");
+                        }
+                    } else {
+                        //this is not transaction just calling the BAPI function and get the result
+                        JCoFunction function = getRFCfunction(destination, rfcFunctionName);
+                        RFCMetaDataParser.processMetaDataDocument(payLoad, function);
+                        responseXML = evaluateRFCfunction(function, destination, escapeErrorHandling);
+                    }
                     processResponse(messageContext, responseXML);
                 } catch (Exception e) {
+                    if (isTransaction(messageContext)) {
+                        //if something went wrong during the transaction, then rollback
+                        JCoFunction rollbackFunction = getRFCfunction(destination,
+                                SAPConstants.BAPI_TRANSACTION_ROLLBACK);
+                        evaluateRFCfunction(rollbackFunction, destination, escapeErrorHandling);
+                        if (log.isDebugEnabled()){
+                            log.debug("Rollback transaction.");
+                        }
+                    }
                     sendFault(messageContext, e , SAP_TRANSPORT_ERROR);
+                } finally {
+                    if (isTransaction(messageContext) || isLogon) {
+                        //end transaction
+                        JCoContext.end(destination);
+                        if (log.isDebugEnabled()){
+                            log.debug("End transaction.");
+                        }
+                    }
                 }
 
             } else {
@@ -158,6 +230,17 @@ public class SAPTransportSender extends AbstractTransportSender {
             sendFault(messageContext,e, SAP_DESTINATION_ERROR);
             handleException("Error while sending an IDoc to the EPR : " + targetEPR, e);
         }
+    }
+
+    /**
+     * Check the transaction commit property value
+     *
+     * @param messageContext axis2 Message Context
+     * @return true or false based on the value
+     */
+    private boolean isTransaction(MessageContext messageContext) {
+        String transactionCommit = (String) messageContext.getProperty(SAPConstants.TRANSACTION_COMMIT_PARAM);
+        return null != transactionCommit && "true".equalsIgnoreCase(transactionCommit);
     }
 
     private char getIDocVersion(URI uri) {
@@ -171,6 +254,34 @@ public class SAPTransportSender extends AbstractTransportSender {
             }
         }
         return IDocFactory.IDOC_VERSION_DEFAULT;
+    }
+
+    /**
+     * Check the logon property value
+     *
+     * @param messageContext axis2 Message Context
+     * @return true or false based on the value
+     */
+    private boolean isLogon(MessageContext messageContext) {
+        String logon = (String) messageContext.getProperty(SAPConstants.TRANSACTION_SAP_LOGON);
+        return (null != logon) && ("true".equalsIgnoreCase(logon));
+    }
+
+    private void logon(MessageContext messageContext, JCoDestination destination, String escapeErrorHandling)
+            throws AxisFault {
+        JCoFunction logonFunction = getRFCfunction(destination, SAPConstants.BABI_XMI_LOGON);
+        logonFunction.getImportParameterList().setValue(SAPConstants.EXTCOMPANY,
+                (String) messageContext.getProperty(SAPConstants.TRANSPORT_SAP_EXTCOMPANY));
+        logonFunction.getImportParameterList().setValue(SAPConstants.EXTPRODUCT,
+                (String) messageContext.getProperty(SAPConstants.TRANSPORT_SAP_EXTPRODUCT));
+        logonFunction.getImportParameterList().setValue(SAPConstants.INTERFACE,
+                (String) messageContext.getProperty(SAPConstants.TRANSPORT_SAP_INTERFACE));
+        logonFunction.getImportParameterList().setValue(SAPConstants.VERSION,
+                (String) messageContext.getProperty(SAPConstants.TRANSPORT_SAP_VERSION));
+        String logonResponse = evaluateRFCfunction(logonFunction, destination, escapeErrorHandling);
+        if (log.isDebugEnabled()) {
+            log.debug("BAPI XMI Logon response: " + logonResponse);
+        }
     }
 
     /**
@@ -201,7 +312,7 @@ public class SAPTransportSender extends AbstractTransportSender {
      * @return the result of the function execution
      * @throws AxisFault throws in case of an error
      */
-    private String evaluateRFCfunction(JCoFunction function, JCoDestination destination)
+    private String evaluateRFCfunction(JCoFunction function, JCoDestination destination, String escapeErrorHandling)
             throws AxisFault {
         log.info("Invoking the RFC function :" + function.getName());
         try {
@@ -217,9 +328,13 @@ public class SAPTransportSender extends AbstractTransportSender {
 
         }
         // there seems to be some error that we need to report: TODO ?
-        if (returnStructure != null && (!(returnStructure.getString("TYPE").equals("")
-                                          || returnStructure.getString("TYPE").equals("S")))) {
-            throw new AxisFault(returnStructure.getString("MESSAGE"));
+        //If property "sap.escape.error.handling" is defined and is true, the original SAP exceptions will
+        // be sent without being handled and thrown as an AxisFault
+        if (escapeErrorHandling == null || "".equals(escapeErrorHandling) || "false".equals(escapeErrorHandling)) {
+            if (returnStructure != null && (!(returnStructure.getString("TYPE").equals("") || returnStructure.getString(
+                    "TYPE").equals("S")))) {
+                throw new AxisFault(returnStructure.getString("MESSAGE"));
+            }
         }
 
         return function.toXML();

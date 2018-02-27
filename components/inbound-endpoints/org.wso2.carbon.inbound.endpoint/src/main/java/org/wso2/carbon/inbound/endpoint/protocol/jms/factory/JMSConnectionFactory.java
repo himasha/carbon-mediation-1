@@ -141,6 +141,8 @@ public class JMSConnectionFactory implements ConnectionFactory, QueueConnectionF
             transactedSession = false;
         } else if ("true".equals(strTransactedSession)) {
             transactedSession = true;
+            logger.warn("Usage of transport.jms.SessionTransacted property is deprecated. Please use SESSION_TRANSACTED " +
+                    "acknowledge mode to create a transacted session");
         }
 
         String strSessionAck = properties.getProperty(JMSConstants.SESSION_ACK);
@@ -154,6 +156,7 @@ public class JMSConnectionFactory implements ConnectionFactory, QueueConnectionF
             sessionAckMode = Session.DUPS_OK_ACKNOWLEDGE;
         } else if (strSessionAck.equals("SESSION_TRANSACTED")) {
             sessionAckMode = Session.SESSION_TRANSACTED;
+            transactedSession = true;
         } else {
             sessionAckMode = 1;
         }
@@ -249,6 +252,10 @@ public class JMSConnectionFactory implements ConnectionFactory, QueueConnectionF
     }
 
     public Connection createConnection(String userName, String password) {
+        if (connectionFactory == null) {
+            logger.error("Connection cannot be establish to the broker. Please check the broker libs provided.");
+            return null;
+        }
         Connection connection = null;
         try {
             if ( JMSConstants.JMS_SPEC_VERSION_1_1.equals(jmsSpec) ) {
